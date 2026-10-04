@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#120e0b">
+  <title>Приключения Коржика</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ===== Титульный экран ===== -->
+  <section id="screen-title" class="screen active">
+    <div class="t-bg" id="tBg"></div>
+    <div class="t-shade"></div>
+    <div id="dust"></div>
+    <div class="t-content">
+      <div class="t-dedic">
+        <span>Для любимой Лены</span>
+        <b>от Димы</b>
+      </div>
+      <div class="t-main">
+        <div class="t-pre">превью</div>
+        <h1>Приключения<br>Коржика</h1>
+        <p class="t-sub">история для ночного чтения</p>
+      </div>
+      <div class="t-btns">
+        <button id="btnPlay" class="btn primary big">Играть</button>
+        <button id="btnSettings" class="btn big">Настройки</button>
+        <p class="t-hint" id="tHint">коснись экрана — зазвучит музыка</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Выбор истории ===== -->
+  <section id="screen-levels" class="screen">
+    <header class="l-head">
+      <button class="icon-btn" id="lvBack" aria-label="Назад">‹</button>
+      <h2>Выбери историю</h2>
+      <button class="icon-btn" id="lvSettings" aria-label="Настройки">⚙</button>
+    </header>
+    <div id="carousel" class="carousel"></div>
+    <div id="dots" class="dots"></div>
+    <p class="l-hint">листай в сторону</p>
+  </section>
+
+  <!-- ===== Игра ===== -->
+  <section id="screen-game" class="screen">
+    <div id="stage"></div>
+    <div id="blackout"></div>
+    <div id="flash"></div>
+
+    <div id="card">
+      <div class="card-in">
+        <div class="card-kicker" id="cKicker"></div>
+        <div class="card-title" id="cTitle"></div>
+        <div class="card-sub" id="cSub"></div>
+        <button class="btn primary" id="cNext">Дальше</button>
+      </div>
+    </div>
+
+    <header class="topbar">
+      <button class="icon-btn" id="gBack" aria-label="В меню">‹</button>
+      <div class="track"><div class="fill" id="fill"></div></div>
+      <button class="icon-btn" id="gEye" aria-label="Скрыть текст">◐</button>
+      <button class="icon-btn" id="gSettings" aria-label="Настройки">⚙</button>
+    </header>
+
+    <div id="panel">
+      <div class="p-tag" id="pTag">Коржик думает</div>
+      <div id="text"><span id="tv"></span><span id="th"></span></div>
+      <div class="p-nav">
+        <button class="nav-btn" id="btnPrev">‹ Назад</button>
+        <span class="count" id="count"></span>
+        <button class="nav-btn go" id="btnNext">Вперёд ›</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Настройки ===== -->
+  <div id="settings" class="modal" aria-hidden="true">
+    <div class="shade" id="setShade"></div>
+    <div class="sheet">
+      <div class="grip"></div>
+      <h3>Настройки</h3>
+
+      <div class="row">
+        <label class="switch"><input type="checkbox" id="sMusic"><i></i><span>Музыка</span></label>
+        <input type="range" id="sMVol" min="0" max="100" aria-label="Громкость музыки">
+      </div>
+      <div class="row">
+        <label class="switch"><input type="checkbox" id="sSfx"><i></i><span>Звуки сцен</span></label>
+        <input type="range" id="sSVol" min="0" max="100" aria-label="Громкость звуков">
+      </div>
+      <div class="row col">
+        <span class="lab">Скорость текста</span>
+        <div class="seg" id="sSpeed">
+          <button data-v="1">Спокойно</button>
+          <button data-v="2">Обычно</button>
+          <button data-v="3">Быстро</button>
+        </div>
+      </div>
+      <div class="row col">
+        <span class="lab">Яркость картинки</span>
+        <input type="range" id="sBright" min="40" max="100">
+      </div>
+      <div class="row col">
+        <span class="lab">Тёплый свет для глаз</span>
+        <input type="range" id="sWarm" min="0" max="40">
+      </div>
+      <div class="set-btns">
+        <button class="btn ghost" id="sReset">Сбросить прогресс</button>
+        <button class="btn primary" id="sClose">Готово</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+  <div id="warm"></div>
+</div>
+
+<script src="story.js"></script>
+<script src="audio.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
