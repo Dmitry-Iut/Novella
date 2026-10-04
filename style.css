@@ -31,7 +31,7 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 #app {
   position: relative; margin: 0 auto; overflow: hidden; background: var(--bg);
   height: 100vh; height: 100dvh;
-  width: min(100vw, calc(100dvh * .52));
+  width: 100%; max-width: 480px;;
 }
 
 .screen {
@@ -101,7 +101,7 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 .t-main { animation: fadeIn 2.6s .5s ease both; }
 .t-pre { font-size: 15px; color: var(--muted); letter-spacing: .3em; margin-bottom: 14px; }
 h1 {
-  margin: 0; font-weight: 600; font-size: 50px; line-height: 1.04; letter-spacing: -.01em;
+  margin: 0; font-weight: 600; font-size: clamp(30px, 10.4vw, 48px); overflow-wrap: anywhere; line-height: 1.04; letter-spacing: -.01em;
   color: #f7dcb4; text-shadow: 0 4px 30px rgba(240, 150, 60, .35);
 }
 .t-sub { margin: 16px 0 0; font-size: 17px; font-style: italic; color: var(--muted); }
