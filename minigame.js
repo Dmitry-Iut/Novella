@@ -1,18 +1,18 @@
-/* minigame.js — мини-игра «Собери перья в корзину».
-   Подключается между audio.js и game.js. Ничего, кроме этого файла, внутри не нужно:
-   стили и разметка создаются сами, картинок и звуков докладывать не надо.
+/* minigame.js — мини-игра «Лови перья корзиной».
+   Подключается между audio.js и game.js. Стили и разметка создаются сами,
+   картинки и звуки докладывать не надо.
 
    Механика:
-   • перья медленно падают и ложатся на пол — подцепи любое пальцем и перенеси в корзину;
-   • перо «пушистое»: когда тащишь одно, соседние отлетают в стороны;
-   • иногда из-под двери дует сквозняк (сперва предупреждение!) — лежащие перья взлетают и сдувает;
-     перо в пальцах ветер не уносит;
-   • когда собрано 6 перьев, прилетает золотое — оно озорное и всё время подпрыгивает.
+   • перья сыплются сверху — води корзину пальцем влево-вправо и лови их;
+   • упущенное перо не пропадает насовсем: оно прилетит снова, поймать надо все 9;
+   • иногда из-под двери дует сквозняк (сперва предупреждение!) — он сдувает падающие перья в сторону;
+   • последнее — золотое перо: быстрое и вертлявое, летит в одиночку.
 */
 const KMini = (() => {
   'use strict';
 
   const TOTAL = 9, NORMAL = 8;          // 8 обычных перьев + 1 золотое
+  const MAX_FLY = 3;                    // сколько перьев одновременно в полёте
   const PAL = [['#c3c8d1', '#858d9b'], ['#f2efe9', '#c2c7d2'], ['#aeb9d0', '#6c7a98']];
   const GOLD = ['#ffe6a8', '#e6933f'];
   const rnd = (a, b) => a + Math.random() * (b - a);
@@ -53,9 +53,10 @@ const KMini = (() => {
 
   let root, cv, g, elCount, elHint, elWind, elSkip, elEnd, built = false;
   let active = false, ended = false, raf = 0, last = 0, T = 0;
-  let W = 0, H = 0, dpr = 1, ST = 0, SB = 0, basket = {}, zone = {};
-  let feathers = [], parts = [], hold = null, count = 0, bump = 0, glow = 0, goldenOut = false;
-  let gust = null, gustId = 0, nextGust = 0, hintT = 0, endT = 0, skipShown = false, cb = null, grabbed = false;
+  let W = 0, H = 0, dpr = 1, ST = 0, SB = 0, basket = { x: 0, tx: 0, vel: 0, tilt: 0 }, zone = {};
+  let feathers = [], parts = [], queue = [], ptr = null, count = 0, misses = 0, bump = 0, glow = 0;
+  let gust = null, gustId = 0, nextGust = 0, nextSpawn = 0, hintT = 0, endT = 0;
+  let skipShown = false, cb = null, moved = false;
 
   /* ---------- разметка ---------- */
   function build() {
@@ -80,7 +81,7 @@ const KMini = (() => {
     cv.addEventListener('pointercancel', onUp);
     elSkip.addEventListener('click', () => done());
     root.querySelector('.mg-go').addEventListener('click', () => done());
-    window.addEventListener('resize', () => { if (active) { resize(); } });
+    window.addEventListener('resize', () => { if (active) resize(); });
   }
 
   function readInsets() {
@@ -97,13 +98,11 @@ const KMini = (() => {
     const r = root.getBoundingClientRect();
     W = r.width; H = r.height; dpr = Math.min(window.devicePixelRatio || 1, 2);
     cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
-    const bw = Math.min(190, W * 0.52);
-    basket = { x: W / 2, w: bw, h: 96, y: H - SB - 34 - 96 };
-    zone = { x0: 32, x1: W - 32, y0: ST + 160, y1: basket.y - 56 };
-    for (const f of feathers) {
-      f.x = clamp(f.x, zone.x0, zone.x1);
-      if (f.gy != null) f.gy = clamp(f.gy, zone.y0, zone.y1);
-    }
+    basket.w = Math.min(170, W * 0.46); basket.h = 96; basket.y = H - SB - 34 - 96;
+    if (!basket.x) basket.x = basket.tx = W / 2;
+    basket.x = clamp(basket.x, basket.w / 2 + 6, W - basket.w / 2 - 6);
+    basket.tx = clamp(basket.tx, basket.w / 2 + 6, W - basket.w / 2 - 6);
+    zone = { x0: 32, x1: W - 32, y0: ST + 160, y1: basket.y };
   }
 
   /* ---------- подсказки / счётчик ---------- */
@@ -122,25 +121,27 @@ const KMini = (() => {
   }
 
   /* ---------- перья ---------- */
-  function mk(i, golden) {
+  function mk(golden) {
     return {
-      golden, type: golden ? 3 : i % 3,
-      x: rnd(zone.x0, zone.x1), y: golden ? -50 : -50 - i * 85,
-      gy: rnd(zone.y0, zone.y1), vx: 0, vy: 0,
-      rot: rnd(-2.6, 2.6), sw: 0, sc: 1, ph: rnd(0, 6.28), sus: rnd(0.7, 1.2),
-      size: golden ? 56 : rnd(44, 52), st: 'air', gid: 0, hop: 0
+      golden, type: golden ? 3 : (Math.random() * 3) | 0,
+      x: rnd(zone.x0, zone.x1), y: -40, py: -40, vx: 0,
+      rot: rnd(-0.8, 0.8), sw: 0, sc: 1, ph: rnd(0, 6.28), sus: rnd(0.8, 1.2),
+      size: golden ? 56 : rnd(44, 52), st: 'fall',
+      amp: golden ? 115 : rnd(35, 70), freq: golden ? 3.2 : rnd(1.3, 2.1),
+      vyBase: golden ? 215 : rnd(135, 175)
     };
   }
 
   function start(name, onDone) {
     if (name !== 'feathers') { if (onDone) onDone(); return; }
     build(); stop();
-    cb = onDone; resize();
-    feathers = []; parts = []; hold = null; count = 0; bump = 0; glow = 0; goldenOut = false;
-    gust = null; nextGust = 7; skipShown = false; grabbed = false; ended = false; T = 0;
-    for (let i = 0; i < NORMAL; i++) feathers.push(mk(i, false));
+    cb = onDone; basket.x = 0; resize();
+    feathers = []; parts = []; ptr = null; count = 0; misses = 0; bump = 0; glow = 0;
+    queue = []; for (let i = 0; i < NORMAL; i++) queue.push(false); queue.push(true);
+    gust = null; nextGust = 7; nextSpawn = 1.2; skipShown = false; moved = false; ended = false; T = 0;
+    basket.vel = 0; basket.tilt = 0;
     elSkip.classList.remove('on'); elEnd.classList.remove('show'); setWind(false, 1);
-    setCount(); setHint('Перетащи перья в корзину');
+    setCount(); setHint('Води корзину пальцем — лови перья');
     active = true; last = performance.now();
     root.classList.add('on');
     raf = requestAnimationFrame(loop);
@@ -148,7 +149,7 @@ const KMini = (() => {
 
   function stop() {
     active = false; cancelAnimationFrame(raf); clearTimeout(endT); clearTimeout(hintT);
-    hold = null; cb = null;
+    ptr = null; cb = null;
     if (root) { root.classList.remove('on'); elEnd.classList.remove('show'); }
   }
 
@@ -157,57 +158,43 @@ const KMini = (() => {
     if (f) f();
   }
 
-  /* ---------- ввод ---------- */
-  const pos = e => { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  /* ---------- ввод: корзина едет за пальцем ---------- */
+  const px = e => { const r = cv.getBoundingClientRect(); return e.clientX - r.left; };
+  const aim = x => { basket.tx = clamp(x, basket.w / 2 + 6, W - basket.w / 2 - 6); };
 
   function onDown(e) {
-    if (!active || ended || hold) return;
-    const p = pos(e); let best = null, bd = 58;
-    for (const f of feathers) {
-      if (f.st !== 'floor' && f.st !== 'air') continue;
-      const d = Math.hypot(f.x - p.x, f.y - p.y);
-      if (d < bd) { bd = d; best = f; }
-    }
-    if (!best) return;
+    if (!active || ended) return;
     try { cv.setPointerCapture(e.pointerId); } catch (x) {}
-    hold = { f: best, id: e.pointerId, x: p.x, y: p.y };
-    best.st = 'held'; best.vx = 0; best.vy = 0;
-    KAudio.play('rustle');
-    if (!grabbed) { grabbed = true; setHint('', 0); }
+    ptr = { id: e.pointerId }; aim(px(e));
+    if (!moved) { moved = true; setHint('', 0); }
     e.preventDefault();
   }
-  function onMove(e) {
-    if (!hold || e.pointerId !== hold.id) return;
-    const p = pos(e); hold.x = p.x; hold.y = p.y;
-  }
-  function onUp(e) {
-    if (!hold || (e && e.pointerId !== hold.id)) return;
-    const f = hold.f; hold = null;
-    if (inMouth(f)) collect(f);
-    else {
-      f.st = 'air'; f.vx = clamp(f.vx * 0.25, -140, 140); f.vy = 0;
-      f.gy = clamp(f.y + rnd(30, 80), zone.y0, zone.y1);
-    }
-  }
-  const inMouth = f => Math.abs(f.x - basket.x) < basket.w / 2 + 14 && f.y > basket.y - 80 && f.y < basket.y + 50;
+  function onMove(e) { if (ptr && e.pointerId === ptr.id) aim(px(e)); }
+  function onUp(e) { if (ptr && e.pointerId === ptr.id) ptr = null; }
 
-  function collect(f) {
-    f.st = 'in'; f.t0 = T; f.fx = f.x; f.fy = f.y;
-    f.tx = basket.x + rnd(-basket.w * 0.27, basket.w * 0.27); f.ty = basket.y + 4; f.irot = rnd(-0.45, 0.45);
+  /* ---------- поймали / упустили ---------- */
+  function caught(f) {
+    f.st = 'in'; f.t0 = T; f.fox = f.x - basket.x; f.fy = f.y;
+    f.ox = rnd(-basket.w * 0.25, basket.w * 0.25); f.oy = rnd(0, 6); f.irot = rnd(-0.45, 0.45);
     count++; bump = 1; setCount();
-    sparkle(basket.x, basket.y + 6, f.golden);
+    sparkle(f.x, basket.y + 6, f.golden);
     KAudio.play(f.golden ? 'chime' : 'jar');
-    if (count === 6 && !goldenOut) {
-      goldenOut = true; feathers.push(mk(99, true));
-      setHint('Золотое перо! Оно озорное — лови!', 3600);
-    }
     if (count >= TOTAL) { ended = true; endT = setTimeout(showEnd, 800); }
   }
 
+  function missed(f) {
+    misses++;
+    queue.unshift(f.golden);             // перо прилетит снова
+    nextSpawn = Math.max(nextSpawn, T + 0.7);
+    for (let i = 0; i < 5; i++)
+      parts.push({ x: f.x + rnd(-14, 14), y: H - SB - 8, vx: rnd(-40, 40), vy: rnd(-90, -30), life: 0.5, max: 0.5, r: rnd(1.5, 2.5), c: '185,167,141' });
+    feathers.splice(feathers.indexOf(f), 1);
+  }
+
   function showEnd() {
-    const sec = Math.round(T), n = sec <= 45 ? 3 : sec <= 75 ? 2 : 1;
+    const n = misses === 0 ? 3 : misses <= 3 ? 2 : 1;
     elEnd.querySelector('.mg-stars').textContent = '★'.repeat(n) + '☆'.repeat(3 - n);
-    elEnd.querySelector('.mg-s').textContent = `собрано за ${sec} с`;
+    elEnd.querySelector('.mg-s').textContent = misses === 0 ? 'без единого промаха' : `промахов: ${misses}`;
     elEnd.classList.add('show');
     KAudio.play('chime'); KAudio.setMood('happy');
   }
@@ -215,7 +202,7 @@ const KMini = (() => {
   function sparkle(x, y, gold) {
     for (let i = 0; i < (gold ? 22 : 10); i++) {
       const a = rnd(-Math.PI, 0), v = rnd(60, 180);
-      parts.push({ x: x + rnd(-30, 30), y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: rnd(0.5, 0.9), max: 0.9,
+      parts.push({ x: x + rnd(-20, 20), y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: rnd(0.5, 0.9), max: 0.9,
         r: rnd(1.5, 3.5), c: gold ? '255,214,130' : '255,226,176' });
     }
   }
@@ -229,9 +216,15 @@ const KMini = (() => {
   }
 
   function update(dt) {
+    // корзина плавно едет за пальцем
+    const dx = basket.tx - basket.x, step = clamp(dx * Math.min(1, dt * 14), -1500 * dt, 1500 * dt);
+    basket.x += step;
+    basket.vel += (step / dt - basket.vel) * Math.min(1, dt * 12);
+    basket.tilt = clamp(basket.vel * 0.00028, -0.22, 0.22);
+
     // сквозняк
     if (!ended) {
-      if (!gust && T >= nextGust && T > 4) {
+      if (!gust && T >= nextGust) {
         gust = { ph: 'warn', t0: T, dir: Math.random() < 0.5 ? -1 : 1, p: 0, id: ++gustId };
         setWind(true, gust.dir);
       }
@@ -246,97 +239,74 @@ const KMini = (() => {
     }
     const s = gust && gust.ph === 'blow' ? Math.sin(Math.PI * gust.p) : 0;
 
-    for (const f of feathers) {
-      const tsc = f.st === 'held' ? 1.22 : (f.st === 'in' || f.st === 'basket') ? 0.9 : 1;
-      f.sc += (tsc - f.sc) * Math.min(1, dt * 12);
-
-      if (f.st === 'held') {
-        const tx = clamp(hold.x, 12, W - 12), ty = hold.y - 34;
-        const dx = tx - f.x, dy = ty - f.y, k = Math.min(1, dt * 18);
-        f.vx = dx * 18; f.x += dx * k; f.y += dy * k;
-        f.rot += (clamp(f.vx * 0.0035, -0.9, 0.9) - f.rot) * Math.min(1, dt * 8);
-        f.sw += (Math.sin(T * 9) * 0.06 - f.sw) * Math.min(1, dt * 10);
-        for (const o of feathers) {          // пушистость: соседние перья разлетаются
-          if (o === f || (o.st !== 'floor' && o.st !== 'air')) continue;
-          const ox = o.x - f.x, oy = o.y - f.y, d = Math.hypot(ox, oy);
-          if (d < 40 && d > 0.1) { o.vx += ox / d * 240 * dt; o.gy = clamp(o.gy + oy / d * 80 * dt, zone.y0, zone.y1); }
-        }
-        continue;
+    // новые перья
+    if (!ended && queue.length && T >= nextSpawn) {
+      const fly = feathers.filter(f => f.st === 'fall').length, nextGold = queue[0];
+      if (nextGold ? fly === 0 : fly < MAX_FLY) {
+        queue.shift(); feathers.push(mk(nextGold)); nextSpawn = T + rnd(0.9, 1.5);
+        if (nextGold) setHint('Золотое перо! Оно быстрое и вертлявое', 3400);
       }
-      if (f.st === 'in') {
-        const p = Math.min(1, (T - f.t0) / 0.45), e = 1 - Math.pow(1 - p, 3);
-        f.x = f.fx + (f.tx - f.fx) * e; f.y = f.fy + (f.ty - f.fy) * e;
-        f.rot += (f.irot - f.rot) * Math.min(1, dt * 10); f.sw *= 0.9;
-        if (p >= 1) f.st = 'basket';
-        continue;
-      }
-      if (f.st === 'basket') continue;
-
-      const lift = f.golden ? 1.6 : 1;
-      if (s > 0) {
-        f.vx += gust.dir * 340 * s * lift * f.sus * dt;
-        if (f.st === 'floor' && s > 0.35 && f.gid !== gust.id) {
-          f.gid = gust.id; f.st = 'air'; f.vy = -80 * lift; f.gy = clamp(f.y + rnd(-25, 35), zone.y0, zone.y1);
-        }
-      }
-      if (f.st === 'air') {
-        f.vy += (95 - f.vy) * Math.min(1, dt * 3);
-        f.vx *= Math.exp(-1.2 * dt);
-        f.x += (f.vx + Math.sin(T * 1.7 + f.ph) * 38) * dt;
-        f.y += f.vy * dt;
-        f.sw += (Math.sin(T * 2.2 + f.ph) * 0.5 - f.sw) * Math.min(1, dt * 6);
-        if (f.y >= f.gy && f.vy > 0) { f.st = 'floor'; f.vy = 0; f.vx *= 0.4; if (f.golden) f.hop = T + rnd(1.2, 2); }
-      } else {
-        f.x += f.vx * dt; f.vx *= Math.exp(-4 * dt);
-        f.y += (f.gy - f.y) * Math.min(1, dt * 8);
-        f.sw += (0 - f.sw) * Math.min(1, dt * 8);
-        if (f.golden && T > f.hop) {         // золотое перо озорничает
-          f.st = 'air'; f.vy = -110; f.vx = rnd(-120, 120); f.gy = clamp(f.y + rnd(-50, 50), zone.y0, zone.y1);
-        }
-      }
-      if (f.x < zone.x0) { f.x = zone.x0; f.vx = Math.abs(f.vx) * 0.5; }
-      else if (f.x > zone.x1) { f.x = zone.x1; f.vx = -Math.abs(f.vx) * 0.5; }
     }
 
-    const near = hold && inMouth(hold.f);
+    const mouthY = basket.y + 8;
+    for (const f of feathers.slice()) {
+      f.sc += (((f.st === 'in' || f.st === 'basket') ? 0.9 : 1) - f.sc) * Math.min(1, dt * 12);
+
+      if (f.st === 'fall') {
+        if (s > 0) f.vx += gust.dir * 300 * s * (f.golden ? 1.4 : 1) * f.sus * dt;
+        f.vx *= Math.exp(-1.1 * dt);
+        f.py = f.y;
+        f.x += (f.vx + Math.sin(T * f.freq + f.ph) * f.amp) * dt;
+        f.y += (f.vyBase + count * 7) * dt;
+        f.sw += (Math.sin(T * f.freq + f.ph) * 0.55 - f.sw) * Math.min(1, dt * 6);
+        if (f.x < zone.x0) { f.x = zone.x0; f.vx = Math.abs(f.vx) * 0.5; }
+        else if (f.x > zone.x1) { f.x = zone.x1; f.vx = -Math.abs(f.vx) * 0.5; }
+        if (f.py < mouthY && f.y >= mouthY && Math.abs(f.x - basket.x) < basket.w / 2 - 2) caught(f);
+        else if (f.y > basket.y + basket.h + 30) missed(f);
+      } else if (f.st === 'in') {
+        const p = Math.min(1, (T - f.t0) / 0.3), e = 1 - Math.pow(1 - p, 3);
+        f.x = basket.x + f.fox + (f.ox - f.fox) * e; f.y = f.fy + (basket.y + 4 + f.oy - f.fy) * e;
+        f.rot += (f.irot - f.rot) * Math.min(1, dt * 10); f.sw *= 0.9;
+        if (p >= 1) f.st = 'basket';
+      } else if (f.st === 'basket') {
+        f.x = basket.x + f.ox; f.y = basket.y + 4 + f.oy;
+      }
+    }
+
+    // подсветка корзины, когда перо над ней
+    let near = false;
+    for (const f of feathers) if (f.st === 'fall' && f.y > mouthY - 170 && Math.abs(f.x - basket.x) < basket.w / 2) near = true;
     glow += ((near ? 1 : 0) - glow) * Math.min(1, dt * 10);
     bump = Math.max(0, bump - dt * 3);
     for (const p of parts) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 220 * dt; }
     parts = parts.filter(p => p.life > 0);
 
-    if (!skipShown && !ended && T > 60) { skipShown = true; elSkip.classList.add('on'); }
+    if (!skipShown && !ended && T > 70) { skipShown = true; elSkip.classList.add('on'); }
   }
 
   /* ---------- рисование ---------- */
-  function drawFeather(f, shadow) {
-    const sc = f.size / 52 * f.sc, ang = f.rot + f.sw;
-    const ox = shadow ? (f.st === 'held' ? 7 : f.st === 'air' ? 6 : 3) : 0;
-    const oy = shadow ? (f.st === 'held' ? 32 : f.st === 'air' ? 16 : 5) : 0;
+  function drawFeather(f) {
+    const sc = f.size / 52 * f.sc;
     g.save();
-    g.translate(f.x + ox, f.y + oy); g.rotate(ang); g.scale(sc, sc);
+    g.translate(f.x, f.y); g.rotate(f.rot + f.sw); g.scale(sc, sc);
     g.beginPath();
     g.moveTo(0, 26);
     g.bezierCurveTo(-14, 14, -16, -10, 0, -28);
     g.bezierCurveTo(15, -10, 14, 12, 0, 26);
     g.closePath();
-    if (shadow) {
-      g.fillStyle = f.st === 'held' ? 'rgba(0,0,0,.18)' : 'rgba(0,0,0,.28)'; g.fill();
-    } else {
-      const c = f.golden ? GOLD : PAL[f.type];
-      const gr = g.createLinearGradient(-14, 0, 14, 0);
-      gr.addColorStop(0, c[0]); gr.addColorStop(1, c[1]);
-      if (f.golden) { g.shadowColor = 'rgba(255,190,90,.9)'; g.shadowBlur = 16 + 6 * Math.sin(T * 4); }
-      g.fillStyle = gr; g.fill();
-      g.shadowBlur = 0;
-      g.lineWidth = 1; g.strokeStyle = 'rgba(40,25,15,.5)'; g.stroke();
-      // стержень и бородки
-      g.strokeStyle = 'rgba(60,40,25,.65)'; g.lineWidth = 1.6; g.lineCap = 'round';
-      g.beginPath(); g.moveTo(0, 34); g.lineTo(0, -24); g.stroke();
-      g.strokeStyle = 'rgba(60,40,25,.28)'; g.lineWidth = 1;
-      for (let k = 0; k < 6; k++) {
-        const y = -18 + k * 7, w = 10 - Math.abs(k - 2.5) * 1.2;
-        g.beginPath(); g.moveTo(0, y); g.lineTo(-w, y - 6); g.moveTo(0, y); g.lineTo(w, y - 6); g.stroke();
-      }
+    const c = f.golden ? GOLD : PAL[f.type];
+    const gr = g.createLinearGradient(-14, 0, 14, 0);
+    gr.addColorStop(0, c[0]); gr.addColorStop(1, c[1]);
+    if (f.golden) { g.shadowColor = 'rgba(255,190,90,.9)'; g.shadowBlur = 16 + 6 * Math.sin(T * 4); }
+    g.fillStyle = gr; g.fill();
+    g.shadowBlur = 0;
+    g.lineWidth = 1; g.strokeStyle = 'rgba(40,25,15,.5)'; g.stroke();
+    g.strokeStyle = 'rgba(60,40,25,.65)'; g.lineWidth = 1.6; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(0, 34); g.lineTo(0, -24); g.stroke();
+    g.strokeStyle = 'rgba(60,40,25,.28)'; g.lineWidth = 1;
+    for (let k = 0; k < 6; k++) {
+      const y = -18 + k * 7, w = 10 - Math.abs(k - 2.5) * 1.2;
+      g.beginPath(); g.moveTo(0, y); g.lineTo(-w, y - 6); g.moveTo(0, y); g.lineTo(w, y - 6); g.stroke();
     }
     g.restore();
   }
@@ -344,7 +314,7 @@ const KMini = (() => {
   function drawBasket() {
     const cx = basket.x, by = basket.y, bw = basket.w, bh = basket.h, rx = bw / 2, ry = 15, my = by + 10;
     g.save();
-    g.translate(cx, by + bh); g.scale(1 + 0.05 * bump, 1 - 0.07 * bump); g.translate(-cx, -(by + bh));
+    g.translate(cx, by + bh); g.rotate(basket.tilt); g.scale(1 + 0.05 * bump, 1 - 0.07 * bump); g.translate(-cx, -(by + bh));
 
     const gl = g.createRadialGradient(cx, my, 4, cx, my, rx + 40);
     gl.addColorStop(0, `rgba(255,200,120,${0.1 + 0.5 * glow})`); gl.addColorStop(1, 'rgba(255,200,120,0)');
@@ -354,7 +324,7 @@ const KMini = (() => {
     g.lineWidth = 7; g.lineCap = 'round'; g.strokeStyle = '#c98b4a';
     g.beginPath(); g.ellipse(cx, my, rx, ry, 0, Math.PI, Math.PI * 2); g.stroke();
 
-    for (const f of feathers) if (f.st === 'basket') drawFeather(f, false);
+    for (const f of feathers) if (f.st === 'basket') drawFeather(f);
 
     const l = cx - bw * 0.42, r = cx + bw * 0.42;
     g.beginPath();
@@ -397,11 +367,9 @@ const KMini = (() => {
   function draw() {
     g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
     drawWind();
-    for (const f of feathers) if (f.st !== 'basket' && f.st !== 'in') drawFeather(f, true);
-    feathers.filter(f => f.st === 'floor' || f.st === 'air').sort((a, b) => a.y - b.y).forEach(f => drawFeather(f, false));
+    for (const f of feathers) if (f.st === 'fall') drawFeather(f);
     drawBasket();
-    for (const f of feathers) if (f.st === 'in') drawFeather(f, false);
-    for (const f of feathers) if (f.st === 'held') drawFeather(f, false);
+    for (const f of feathers) if (f.st === 'in') drawFeather(f);
     for (const p of parts) {
       g.fillStyle = `rgba(${p.c},${clamp(p.life / p.max, 0, 1)})`;
       g.beginPath(); g.arc(p.x, p.y, p.r, 0, Math.PI * 2); g.fill();
