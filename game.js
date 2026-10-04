@@ -139,6 +139,7 @@
   }
 
   function startChapter(id) {
+    KMini.stop();
     chapter = CHAPTERS.find(c => c.id === id);
     beats = chapter.beats; idx = 0; curScene = null; sceneSeq++;
     $('#stage').innerHTML = '';
@@ -183,6 +184,7 @@
   }
 
   function show(i, dir) {
+    if (beats[i].mini && dir < 0) { show(i - 1, -1); return; }
     idx = i; const b = beats[i], panel = $('#panel'), card = $('#card');
     $('#fill').style.width = ((i + 1) / beats.length * 100) + '%';
     $('#count').textContent = `${i + 1} / ${beats.length}`;
@@ -191,6 +193,13 @@
     panel.classList.remove('peek');
     if (b.s) setScene(b.s);
     KAudio.setMood(moodAt(i));
+    KMini.stop();
+    if (b.mini) {
+      stopType(); card.classList.remove('show'); panel.classList.add('hidden');
+      $('#btnPrev').disabled = true;
+      KMini.start(b.mini, () => next());
+      return;
+    }
 
     if (b.card) {
       stopType();
@@ -212,11 +221,13 @@
   }
 
   function next() {
+    if (KMini.active) return;
     if (typing) { finishTyping(); return; }
     if (idx >= beats.length - 1) { finishChapter(); return; }
     show(idx + 1, 1);
   }
   function prev() {
+    if (KMini.active) return;
     if (idx === 0) return;
     stopType(); show(idx - 1, -1);
   }
@@ -230,7 +241,7 @@
     if (wasNew && nextCh && !nextCh.dev) setTimeout(() => toast(`Открыто: ${nextCh.label} — ${nextCh.title}`), 700);
   }
 
-  function leaveGame() { stopType(); const k = CHAPTERS.indexOf(chapter); openLevels(Math.max(0, k)); }
+  function leaveGame() { KMini.stop();stopType(); const k = CHAPTERS.indexOf(chapter); openLevels(Math.max(0, k)); }
 
   $('#btnNext').addEventListener('click', next);
   $('#btnPrev').addEventListener('click', prev);
