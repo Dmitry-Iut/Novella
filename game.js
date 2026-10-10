@@ -1,4 +1,4 @@
-/* game.js — движок новеллы: экраны, карусель, сцены, текст, настройки */
+/* game.js — движок новеллы: экраны, карусель, сцены, текст, выбор, мини-игры, настройки */
 (() => {
   'use strict';
   const $ = (s, r = document) => r.querySelector(s);
@@ -13,6 +13,11 @@
     if (raw) { const p = JSON.parse(raw); state.done = p.done || {}; state.set = { ...DEFAULTS, ...(p.set || {}) }; }
   } catch (e) {}
   const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} };
+
+  /* ---------- мини-игры ---------- */
+  const MINIS = { feathers: KMini, ball: KBall, draw: KDraw };
+  const stopMinis = () => Object.values(MINIS).forEach(m => m.stop());
+  const miniOn = () => Object.values(MINIS).some(m => m.active);
 
   /* ---------- экраны ---------- */
   let screen = 'title';
@@ -32,9 +37,11 @@
   const sceneCache = {};
   function loadScene(id) {
     if (sceneCache[id]) return sceneCache[id];
+    const named = SCENE_FILES[id];
+    const base = named ? named.replace(/\.\w+$/, '') : `scene_${id}`;
     const cands = [];
-    if (SCENE_FILES[id]) cands.push('images/' + SCENE_FILES[id]);
-    ['jpg', 'png', 'jpeg', 'webp'].forEach(e => { const u = `images/scene_${id}.${e}`; if (!cands.includes(u)) cands.push(u); });
+    if (named) cands.push('images/' + named);
+    ['jpg', 'png', 'jpeg', 'webp'].forEach(e => { const u = `images/${base}.${e}`; if (!cands.includes(u)) cands.push(u); });
     sceneCache[id] = (async () => {
       for (const u of cands) {
         const ok = await new Promise(r => { const im = new Image(); im.onload = () => r(true); im.onerror = () => r(false); im.src = u; });
@@ -79,17 +86,17 @@
       } else if (ch.dev) {
         html += '<span class="c-status">в разработке</span>';
       } else {
-        html += '<span class="c-status">откроется после введения</span>';
+        html += `<span class="c-status">${ch.lockText || 'откроется после введения'}</span>`;
       }
       html += '</div>';
       el.innerHTML = html;
       el.addEventListener('click', () => {
         if (open) startChapter(ch.id);
-        else toast(ch.dev ? 'Эта история ещё в разработке' : 'Сначала пройди введение');
+        else toast(ch.dev ? 'Эта история ещё в разработке' : (ch.lockToast || 'Сначала пройди введение'));
       });
       car.appendChild(el);
     });
-    $$('.c-img', car).forEach(d => loadScene(+d.dataset.cover).then(u => { if (u) d.style.backgroundImage = `url('${u}')`; }));
+    $$('.c-img', car).forEach(d => loadScene(d.dataset.cover).then(u => { if (u) d.style.backgroundImage = `url('${u}')`; }));
 
     const dots = $('#dots'); dots.innerHTML = '';
     CHAPTERS.forEach(() => dots.appendChild(document.createElement('i')));
@@ -117,6 +124,7 @@
 
   /* ---------- игра ---------- */
   let chapter = null, beats = [], idx = 0, curScene = null, sceneSeq = 0, typing = null;
+  let inserted = new Map();   // сколько реплик вставила выбранная ветка (для каждой реплики с выбором)
 
   const PH = id => `<div class="sbg ph-bg"></div><div class="ph"><div class="ph-ico">🖼</div>` +
     `<div class="ph-t">Сцена ${id}</div><div class="ph-s">${SCENE_CAPTIONS[id] || ''}</div>` +
@@ -139,11 +147,16 @@
   }
 
   function startChapter(id) {
-    KMini.stop();
+    stopMinis();
     chapter = CHAPTERS.find(c => c.id === id);
-    beats = chapter.beats; idx = 0; curScene = null; sceneSeq++;
+    beats = chapter.beats.slice(); inserted = new Map(); idx = 0; curScene = null; sceneSeq++;
     $('#stage').innerHTML = '';
-    new Set(beats.map(b => b.s).filter(Boolean)).forEach(loadScene);
+    const pre = new Set();
+    chapter.beats.forEach(b => {
+      if (b.s) pre.add(b.s);
+      (b.choice || []).forEach(o => (o.beats || []).forEach(x => x.s && pre.add(x.s)));
+    });
+    pre.forEach(loadScene);
     go('game');
     show(0, 1);
   }
@@ -183,8 +196,38 @@
     if (name === 'flash') { const f = $('#flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
   }
 
+  /* ---------- выбор ---------- */
+  function renderChoices(b) {
+    const box = $('#choices'), panel = $('#panel');
+    box.innerHTML = '';
+    const has = !!(b.choice && b.choice.length);
+    panel.dataset.ch = has ? '1' : '0';
+    box.classList.toggle('on', has);
+    if (!has) return;
+    b.choice.forEach((o, k) => {
+      const el = document.createElement('button');
+      el.className = 'btn' + (k === 0 ? ' primary' : '');
+      el.textContent = o.t;
+      el.addEventListener('click', () => choose(k));
+      box.appendChild(el);
+    });
+  }
+
+  function choose(k) {
+    const b = beats[idx];
+    if (!b || !b.choice) return;
+    const old = inserted.get(b) || 0;
+    if (old) beats.splice(idx + 1, old);            // выбор можно переиграть, если вернуться назад
+    const add = (b.choice[k].beats || []).slice();
+    beats.splice(idx + 1, 0, ...add);
+    inserted.set(b, add.length);
+    KAudio.play('tap');
+    if (add.length) show(idx + 1, 1);
+    else next();
+  }
+
   function show(i, dir) {
-    if (beats[i].mini && dir < 0) { show(i - 1, -1); return; }
+    if (beats[i].mini && dir < 0) { show(i - 1, -1); return; }   // назад мини-игру не перезапускаем
     idx = i; const b = beats[i], panel = $('#panel'), card = $('#card');
     $('#fill').style.width = ((i + 1) / beats.length * 100) + '%';
     $('#count').textContent = `${i + 1} / ${beats.length}`;
@@ -193,11 +236,13 @@
     panel.classList.remove('peek');
     if (b.s) setScene(b.s);
     KAudio.setMood(moodAt(i));
-    KMini.stop();
+    stopMinis();
+    renderChoices(b);
+
     if (b.mini) {
       stopType(); card.classList.remove('show'); panel.classList.add('hidden');
       $('#btnPrev').disabled = true;
-      KMini.start(b.mini, () => next());
+      MINIS[b.mini].start(b.mini, () => next());
       return;
     }
 
@@ -221,13 +266,14 @@
   }
 
   function next() {
-    if (KMini.active) return;
+    if (miniOn()) return;
     if (typing) { finishTyping(); return; }
+    if (beats[idx].choice && !inserted.get(beats[idx])) return;   // сначала нужно выбрать
     if (idx >= beats.length - 1) { finishChapter(); return; }
     show(idx + 1, 1);
   }
   function prev() {
-    if (KMini.active) return;
+    if (miniOn()) return;
     if (idx === 0) return;
     stopType(); show(idx - 1, -1);
   }
@@ -241,7 +287,7 @@
     if (wasNew && nextCh && !nextCh.dev) setTimeout(() => toast(`Открыто: ${nextCh.label} — ${nextCh.title}`), 700);
   }
 
-  function leaveGame() { KMini.stop();stopType(); const k = CHAPTERS.indexOf(chapter); openLevels(Math.max(0, k)); }
+  function leaveGame() { stopMinis(); stopType(); const k = CHAPTERS.indexOf(chapter); openLevels(Math.max(0, k)); }
 
   $('#btnNext').addEventListener('click', next);
   $('#btnPrev').addEventListener('click', prev);
@@ -261,7 +307,7 @@
   }, { passive: true });
 
   document.addEventListener('keydown', e => {
-    if (screen !== 'game') return;
+    if (screen !== 'game' || miniOn()) return;
     if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); next(); }
     if (e.key === 'ArrowLeft') prev();
   });

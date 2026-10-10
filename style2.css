@@ -1,0 +1,6 @@
+/* style2.css — кнопки выбора в диалогах (часть 2). Подключается после style.css */
+#choices { display: none; flex-direction: column; gap: 10px; margin: 10px 0 6px; }
+#panel.done #choices.on { display: flex; animation: chIn .45s ease both; }
+#choices .btn { width: 100%; min-height: 52px; font-size: 18px; padding: 0 22px; border-radius: 26px; text-align: center; }
+@keyframes chIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+#panel[data-ch="1"] #btnNext { visibility: hidden; }

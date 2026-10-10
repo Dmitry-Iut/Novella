@@ -265,5 +265,9 @@ const KAudio = (() => {
     try { SFX[name](ctx.currentTime + 0.03 + delay); } catch (e) {}
   }
 
-  return { init, resume, suspend, setSettings, setMood, play };
+  /* ---------- расширения (часть 2): audio2.js докладывает сюда новую музыку и звуки ---------- */
+  function addMoods(m) { Object.assign(MOODS, m); }
+  function addSfx(factory) { Object.assign(SFX, factory({ noise, tone, rnd, midi, SFX })); }
+
+  return { init, resume, suspend, setSettings, setMood, play, addMoods, addSfx };
 })();
